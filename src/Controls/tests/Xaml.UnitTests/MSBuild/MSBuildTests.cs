@@ -501,6 +501,32 @@ namespace Microsoft.Maui.Controls.MSBuild.UnitTests
 			Assert.Equal(expectedXamlC, actualXamlC);
 		}
 
+		[Fact]
+		public void CSharpOnlyChange_DoesTriggerXamlCInRelease()
+		{
+			SetUp();
+			intermediateDirectory = IOPath.Combine(tempDirectory, "obj", "Release", GetTfm());
+			var project = NewProject();
+			project.Add(AddFile("MainPage.xaml", "MauiXaml", Xaml.MainPage));
+			var projectFile = IOPath.Combine(tempDirectory, "test.csproj");
+			project.Save(projectFile);
+			Build(projectFile, additionalArgs: "-c Release");
+
+			var xamlCStamp = IOPath.Combine(intermediateDirectory, "XamlC.stamp");
+			AssertExists(xamlCStamp);
+
+			var expectedXamlC = new FileInfo(xamlCStamp).LastWriteTimeUtc;
+
+			//Build again, after adding a C# file (no XAML changes), XamlC SHOULD re-run in Release mode
+			project.Add(AddFile("NewClass.cs", "Compile", "namespace Test { public class NewClass { } }"));
+			project.Save(projectFile);
+			Build(projectFile, additionalArgs: "-c Release");
+			AssertExists(xamlCStamp);
+
+			var actualXamlC = new FileInfo(xamlCStamp).LastWriteTimeUtc;
+			Assert.NotEqual(expectedXamlC, actualXamlC);
+		}
+
 		[Fact(Skip = "source gen changes")]
 		public void TouchXamlFile()
 		{

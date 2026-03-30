@@ -235,6 +235,7 @@
 		</CompileDependsOn>
 	</PropertyGroup>
 
+	<!-- XamlC: Runs in non-validate-only mode (typically Release). KEEP BODY IN SYNC WITH _XamlCValidateOnly -->
 	<Target Name="XamlC"
 		AfterTargets="AfterCompile"
 		Inputs="$(IntermediateOutputPath)$(TargetFileName);@(MauiXaml)"
@@ -275,6 +276,7 @@
 		</ItemGroup>
 	</Target>
 
+	<!-- _XamlCValidateOnly: Runs in validate-only mode (typically Debug). KEEP BODY IN SYNC WITH XamlC -->
 	<Target Name="_XamlCValidateOnly"
 		AfterTargets="AfterCompile"
 		Inputs="@(MauiXaml)"
