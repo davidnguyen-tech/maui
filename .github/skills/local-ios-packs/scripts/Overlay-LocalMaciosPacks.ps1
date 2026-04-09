@@ -554,9 +554,10 @@ function Invoke-Overlay {
             $content = Get-Content -Path $manifestPath -Raw
             $newContent = $content
 
-            # Replace the top-level "version" field
-            $topLevelPattern = '(?<=^\s*"version"\s*:\s*)"' + [regex]::Escape($installedVersion) + '"'
-            $newContent = [regex]::Replace($newContent, $topLevelPattern, "`"$localVersion`"", [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            # Replace the top-level "version" field (first occurrence only).
+            # Can't use ^\s* with Multiline — it matches nested pack "version" lines too.
+            $topLevelRegex = [regex]::new([regex]::Escape("`"version`": `"$installedVersion`""))
+            $newContent = $topLevelRegex.Replace($newContent, "`"version`": `"$localVersion`"", 1)
 
             # For each overlaid pack, replace its version entry inside the "packs" section
             foreach ($overlaidPackId in $overlaidPackIds) {
