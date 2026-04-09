@@ -53,6 +53,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not $IsMacOS) {
+    throw "This script is designed for macOS only. It modifies macOS-specific iOS/MacCatalyst workload packs."
+}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -171,9 +175,8 @@ function Get-PacksFromManifest {
         if ($packId -match '\.Windows\.') { continue }
         # Skip template packs
         if ($packId -match '\.Templates') { continue }
-        # Skip backcompat packs (net10.0, etc.) — only overlay current-TFM packs
-        # Heuristic: current-TFM packs contain 'net11' or the highest net version in the ID
-        # Better: only include packs whose version matches the manifest's top-level version
+        # Skip backcompat packs (net10.0, etc.) — only overlay packs whose
+        # version matches the manifest's top-level version (= current TFM).
         $packInfo = $Manifest.packs.$packId
         if ($packInfo.version -ne $Manifest.version) { continue }
 
@@ -291,6 +294,9 @@ function Invoke-Restore {
     }
 
     $state = Get-Content -Path $stateFile -Raw | ConvertFrom-Json
+    if ($state.status -eq 'in-progress') {
+        Write-Warning "State file indicates an in-progress overlay (possibly interrupted). Will attempt restore."
+    }
     Write-Status "Restoring overlay from $($state.timestamp)..."
     Write-Status "Old version: $($state.oldVersion) | Local version: $($state.newVersion)"
 
@@ -344,16 +350,15 @@ function Invoke-Restore {
         }
     }
 
-    # Remove state file
-    Remove-Item -Path $stateFile -Force
-
     if ($errors.Count -gt 0) {
         Write-Warning "Restore completed with errors:"
         foreach ($err in $errors) {
             Write-Warning "  $err"
         }
+        Write-Warning "State file retained for retry: $stateFile"
     }
     else {
+        Remove-Item -Path $stateFile -Force
         Write-Success "Restore complete. All packs reverted to version $($state.oldVersion)."
     }
 }
@@ -482,6 +487,19 @@ function Invoke-Overlay {
     $overlaidPacks = @()
     $manifestBackups = @()
 
+    # Write preliminary state file before starting modifications so that
+    # an interrupted overlay can be detected and restored.
+    $preliminaryState = @{
+        status          = 'in-progress'
+        oldVersion      = $installedVersion
+        newVersion      = $localVersion
+        packs           = @()
+        manifestBackups = @()
+        timestamp       = (Get-Date -Format 'o')
+        platform        = $Platform
+    }
+    $preliminaryState | ConvertTo-Json -Depth 5 | Set-Content -Path $stateFile
+
     try {
         foreach ($pack in $matchedPacks) {
             $packId = $pack.PackId
@@ -519,24 +537,43 @@ function Invoke-Overlay {
             }
         }
 
-        # Patch WorkloadManifest.json files
+        # Patch WorkloadManifest.json files — only replace versions for overlaid packs,
+        # leaving non-overlaid pack entries unchanged.
+        $overlaidPackIds = $overlaidPacks | ForEach-Object { $_.packId }
+
         foreach ($manifestPath in $manifestPaths) {
             $backupPath = "$manifestPath.overlay-backup"
             Write-Status "Patching manifest: $(Split-Path $manifestPath -Leaf)"
             Copy-Item -Path $manifestPath -Destination $backupPath -Force
             $manifestBackups += $backupPath
 
-            # Read the raw JSON text and replace version strings.
+            # Read the raw JSON text and do targeted version replacements.
             # We do text replacement rather than object manipulation to preserve
             # the file's formatting and trailing commas (which are valid in the
             # manifest but would be lost through ConvertFrom-Json → ConvertTo-Json).
             $content = Get-Content -Path $manifestPath -Raw
-            $content = $content.Replace("`"$installedVersion`"", "`"$localVersion`"")
-            Set-Content -Path $manifestPath -Value $content -NoNewline
+            $newContent = $content
+
+            # Replace the top-level "version" field
+            $topLevelPattern = '(?<=^\s*"version"\s*:\s*)"' + [regex]::Escape($installedVersion) + '"'
+            $newContent = [regex]::Replace($newContent, $topLevelPattern, "`"$localVersion`"", [System.Text.RegularExpressions.RegexOptions]::Multiline)
+
+            # For each overlaid pack, replace its version entry inside the "packs" section
+            foreach ($overlaidPackId in $overlaidPackIds) {
+                $packPattern = "(?<=`"$([regex]::Escape($overlaidPackId))`"\s*:\s*\{[^}]*`"version`"\s*:\s*)`"$([regex]::Escape($installedVersion))`""
+                $newContent = [regex]::Replace($newContent, $packPattern, "`"$localVersion`"", [System.Text.RegularExpressions.RegexOptions]::Singleline)
+            }
+
+            if ($newContent -eq $content) {
+                throw "Failed to patch version in manifest: $manifestPath — version string '$installedVersion' not found."
+            }
+
+            Set-Content -Path $manifestPath -Value $newContent -NoNewline
         }
 
-        # Write overlay state file
+        # Update overlay state file to reflect completed status
         $state = @{
+            status          = 'complete'
             oldVersion      = $installedVersion
             newVersion      = $localVersion
             packs           = $overlaidPacks

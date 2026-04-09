@@ -162,6 +162,6 @@ If MAUI builds fail after overlaying, the local macios version may be incompatib
 ## Limitations
 
 - **Current TFM only** — overlays net11.0 packs, not backcompat (net10.0) packs. If you need to test older TFM packs, you'll need to modify the version filtering.
-- **Does not override NETCore.App runtime packs** — Mono runtime packs (`Microsoft.NETCore.App.Runtime.Mono.*`) and AOT cross-compilation packs are NOT overlaid. Use the [use-local-runtime](.github/skills/use-local-runtime/) skill for that.
+- **Does not override NETCore.App runtime packs** — Mono runtime packs (`Microsoft.NETCore.App.Runtime.Mono.*`) and AOT cross-compilation packs are NOT overlaid. For overriding NETCore.App Mono runtime packs (from dotnet/runtime), a separate workflow is needed (not covered by this skill).
 - **macOS only** — the script targets macOS development workflows. Windows pack overlays (e.g., `Microsoft.iOS.Windows.Sdk`) are not supported.
 - **Alias-to packs** — the script handles `alias-to` entries in the manifest, resolving to the correct pack name for macOS. If a future manifest changes alias patterns, the matching logic may need updating.
