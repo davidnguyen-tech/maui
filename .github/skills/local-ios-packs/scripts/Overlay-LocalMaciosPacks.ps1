@@ -452,7 +452,7 @@ function Invoke-Overlay {
     }
 
     # Verify all matched packs share the same version
-    $localVersions = $matchedPacks | ForEach-Object { $_.LocalVersion } | Sort-Object -Unique
+    $localVersions = @($matchedPacks | ForEach-Object { $_.LocalVersion } | Sort-Object -Unique)
     if ($localVersions.Count -gt 1) {
         throw "Found mixed versions in nupkg files: $($localVersions -join ', '). All packs must be from the same build."
     }
