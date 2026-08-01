@@ -130,7 +130,7 @@ static class MibcProfileGenerator
 		var result = new List<string>();
 		foreach (var arg in args)
 		{
-			if (arg.StartsWith('@'))
+			if (arg.StartsWith('@', StringComparison.Ordinal))
 			{
 				string responseFile = arg.Substring(1);
 				if (!File.Exists(responseFile))
@@ -142,7 +142,7 @@ static class MibcProfileGenerator
 				foreach (var line in File.ReadAllLines(responseFile))
 				{
 					var trimmed = line.Trim();
-					if (trimmed.Length > 0 && !trimmed.StartsWith('#'))
+					if (trimmed.Length > 0 && !trimmed.StartsWith('#', StringComparison.Ordinal))
 						result.Add(trimmed);
 				}
 			}
