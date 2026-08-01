@@ -309,13 +309,36 @@
 			<Output TaskParameter="Lines" ItemName="_MibcMatchedAssemblies" />
 		</ReadLinesFromFile>
 
+		<!-- The generator reports full paths, but PrepareForReadyToRunCompilation matches
+		     all three item lists below against Path.GetFileName(). Passing full paths makes
+		     every lookup miss, so the matched assemblies are never promoted to partial R2R
+		     and no InitializeComponent method is compiled. Reduce to filenames first.
+
+		     KNOWN REMAINING BLOCKER (Apple composite): with these two fixes the generator runs
+		     and the assembly is correctly promoted, but the build then fails in
+		     _CopyFilesToPublishDirectory with "Could not copy obj/.../R2R/<App>.dylib". Pulling a
+		     user assembly back into R2R makes the SDK schedule a separate per-assembly image,
+		     while the Apple SDK's _FixR2ROutputPaths only rewrites _ReadyToRunCompileList output
+		     paths when PublishReadyToRunComposite != true. Neither dropping
+		     PublishReadyToRunCompositeExclusions nor adding the assembly to
+		     PublishReadyToRunCompositeRoots avoids it. Unresolved here. -->
+		<ItemGroup>
+			<_MibcMatchedAssemblyNames Include="@(_MibcMatchedAssemblies->'%(Filename)%(Extension)')" />
+		</ItemGroup>
+
 		<ItemGroup>
 			<PublishReadyToRunPgoFiles Include="$(_MauiMibcProfilePath)" />
 			<FileWrites Include="$(_MauiMibcProfilePath);$(_MauiMibcMatchedListPath);$(_MibcInputListPath)" />
-			<!-- Only promote assemblies that contributed methods to the MIBC profile -->
-			<PublishReadyToRunPartialAssemblies Include="@(_MibcMatchedAssemblies)" />
-			<PublishReadyToRunCompositeExclusions Include="@(_MibcMatchedAssemblies)" />
-			<PublishReadyToRunExclude Remove="@(_MibcMatchedAssemblies)" />
+			<!-- Only promote assemblies that contributed methods to the MIBC profile.
+			     Deliberately NOT added to PublishReadyToRunCompositeExclusions: that sets
+			     doNotBuildIntoComposite, which makes the SDK expect a standalone per-assembly
+			     R2R image (R2R/<name>.dylib) that the Apple composite pipeline never emits,
+			     failing the build in _CopyFilesToPublishDirectory. Marking the assembly partial
+			     while leaving it in the composite is what actually compiles just the profiled
+			     XAML methods, which is this feature's goal. -->
+			<PublishReadyToRunPartialAssemblies Include="@(_MibcMatchedAssemblyNames)" />
+			<PublishReadyToRunCompositeExclusions Include="@(_MibcMatchedAssemblyNames)" />
+			<PublishReadyToRunExclude Remove="@(_MibcMatchedAssemblyNames)" />
 		</ItemGroup>
 	</Target>
 
@@ -323,7 +346,19 @@
 	     WriteOnlyWhenDifferent preserves the timestamp on no-change,
 	     allowing _MauiRunMibcProfileGenerator to skip via Inputs/Outputs. -->
 	<Target Name="_MauiWriteMibcInputList">
-		<WriteLinesToFile File="$(_MibcInputListPath)" Lines="@(PublishReadyToRunExclude)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+		<!-- PublishReadyToRunExclude carries bare filenames, not paths: the iOS SDK fills it
+		     with @(_UserAssemblies->'%(Filename)%(Extension)') because the SDK treats it as a
+		     filename-matched exclusion list. The generator needs real files, so resolve each
+		     name back to the corresponding ResolvedFileToPublish path. -->
+		<PropertyGroup>
+			<_MibcExcludedNameList>;@(PublishReadyToRunExclude);</_MibcExcludedNameList>
+		</PropertyGroup>
+		<ItemGroup>
+			<_MibcInputAssemblies
+				Include="@(ResolvedFileToPublish)"
+				Condition=" '%(Extension)' == '.dll' AND $(_MibcExcludedNameList.Contains(';%(Filename)%(Extension);')) " />
+		</ItemGroup>
+		<WriteLinesToFile File="$(_MibcInputListPath)" Lines="@(_MibcInputAssemblies)" Overwrite="true" WriteOnlyWhenDifferent="true" />
 	</Target>
 
 	<!-- Run the MIBC generator when the input list or any input assembly is newer than the output.
@@ -331,7 +366,7 @@
 	     check requires both files to be present and up-to-date before skipping the generator;
 	     the parent target reads the sidecar to drive PublishReadyToRunPartialAssemblies. -->
 	<Target Name="_MauiRunMibcProfileGenerator"
-		Inputs="$(_MibcInputListPath);@(PublishReadyToRunExclude)"
+		Inputs="$(_MibcInputListPath);@(_MibcInputAssemblies)"
 		Outputs="$(_MauiMibcProfilePath);$(_MauiMibcMatchedListPath)">
 		<Exec Command="&quot;$(_MibcDotNetHostPath)&quot; exec &quot;$(_MibcProfileGeneratorPath)&quot; &quot;$(_MauiMibcProfilePath)&quot; @&quot;$(_MibcInputListPath)&quot;" />
 	</Target>
